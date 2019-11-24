@@ -1,0 +1,159 @@
+/*
+Building a calendar for fiscal year starting in September(after the last Saturday in August) 
+11/19/18 Kelsey Sunderman Original
+*/
+
+USE [DATABASE]
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+-- 1=Sunday to 7=Saturday
+SET DATEFIRST 7
+GO
+
+IF OBJECT_ID('dbo.ref.days') IS NOT NULL DROP TABLE ref.days;
+  
+GO
+
+CREATE TABLE ref.days (
+	PKDate date NOT NULL PRIMARY KEY CLUSTERED, 
+   -- Years
+	calendar_year smallint,
+ -- Months
+	calendar_month tinyint,
+ -- Weeks
+	calendar_week_in_year tinyint, 
+-- Days
+    calendar_day_in_year smallint, 
+    calendar_day_in_week tinyint,  -- The first of the month 
+    calendar_day_in_month tinyint, 
+	fiscal_year smallint, 
+	fiscal_month smallint,
+	fiscal_week_in_month tinyint,  
+	fiscal_week_in_year tinyint, 
+	fiscal_day_in_month tinyint,
+	fiscal_day_in_year smallint,
+	continuous_year tinyint
+   )
+GO
+
+-- Create the table, with dates ranging from 2010 to 2026.  
+Declare @dt_start date = '2010-08-31', @dt_end date = '2026-08-31', @total_days int, @i int = 0
+SELECT @total_days = DATEDIFF(d, @dt_start, @dt_end) 
+
+WHILE @i <= @total_days
+   begin
+   INSERT INTO ref.days (PKDate) 
+   SELECT CAST(DATEADD(d, @i, @dt_start) as DATE) 
+
+   SET @i = @i + 1
+   end
+
+UPDATE ref.days
+SET 
+   calendar_year = YEAR(PKDate), 
+   calendar_month = DATEPART(m, PKDate), 
+   calendar_week_in_year = DATEPART(WK, PKDate), 
+   calendar_day_in_year = DATEPART(dy, PKDate), 
+   calendar_day_in_week = DATEPART(Weekday, PKDate),
+   calendar_day_in_month = DATEPART(d, PKDate)
+   
+/*
+-- The fiscal year is the same calendar year as the last eight months
+UPDATE ref.days
+SET fiscal_year = 
+   CASE WHEN calendar_month IN (9, 10, 11, 12) THEN calendar_year + 1
+   ELSE calendar_year END
+
+UPDATE ref.days
+SET fiscal_month = CASE calendar_month 
+   WHEN 9 THEN 1 WHEN 10 THEN 2 WHEN 11 THEN 3 
+   WHEN 12 THEN 4 WHEN 1 THEN 5 WHEN 2 THEN 6 
+   WHEN 3 THEN 7 WHEN 4 THEN 8 WHEN 5 THEN 9 
+   WHEN 6 THEN 10 WHEN 7 THEN 11 WHEN 8 THEN 12 END
+
+  */
+
+Declare @fiscal_month smallint = 1, @fiscal_year smallint
+Declare @dtYearStart date, @dtStart date, @dtEnd date, @dt date
+Declare @counter int = 1, @counter_year int = 1, @counter_month int = 1, @counter_week int = 1, @counter_day int = 1
+
+UPDATE ref.days	
+SET
+   continuous_year = DATEDIFF(year, @dt_start, PKDate) + 1
+  
+-- Run this for 16 years from 2010 to 2026
+WHILE @counter_year <= 16
+begin
+
+   --fiscal year starts after the last saturday in August
+   SELECT @dtYearStart = MAX(PKDate), @dtEnd = MAX(PKDate)
+   FROM ref.days
+   WHERE continuous_year = @counter_year AND 
+ calendar_month = 8 AND calendar_day_in_week = 7 
+
+--YEAR and MONTHS
+SELECT @fiscal_year = YEAR(@dtYearStart) + 1, @fiscal_month = 1
+
+SET @counter = 1 
+WHILE @counter <= 12
+	begin
+
+	SELECT @dtStart = DATEADD(day, 1, @dtEnd)
+    SELECT @dtEnd = DATEADD(day, CASE WHEN @fiscal_month IN (1, 4, 7, 10) THEN 34 ELSE 27 END, @dtStart) 
+
+UPDATE ref.days
+SET fiscal_year = @fiscal_year, fiscal_month = @fiscal_month
+FROM ref.days
+WHERE PKDate >= @dtStart AND PKDate <= @dtEnd
+
+;WITH ro AS (SELECT PKDate, RANK() OVER (ORDER BY PKDate) as row_order FROM ref.days WHERE fiscal_year = @fiscal_year AND fiscal_month = @fiscal_month)
+UPDATE ref.days
+SET fiscal_day_in_month = row_order
+FROM Ref.days
+JOIN ro ON days.PKDate = ro.PKDate 
+
+SELECT @counter = @counter + 1, @fiscal_month = @fiscal_month + 1
+
+end
+-- WEEKS
+   SELECT @counter = 1, @counter_week = 1, @dt_end =  @dtYearStart
+   WHILE @counter <= 53
+      begin
+
+      SELECT @dtStart = DATEADD(day, 1, @dtEnd)
+      SELECT @dtEnd = DATEADD(day, 6, @dtStart) 
+
+      UPDATE ref.days
+      SET fiscal_week_in_month = @counter_week, fiscal_week_in_year = @counter
+      FROM ref.days
+      WHERE PKDate >= @dtStart AND PKDate <= @dtEnd
+
+
+      SELECT @counter = @counter + 1
+   
+ 
+      -- Get the fiscal month of the row to determine if the month has 4 or 5 weeks.
+      SELECT @fiscal_month = fiscal_month FROM ref.days WHERE PKDate = @dtStart
+
+      SELECT @counter_week = CASE 
+         WHEN @fiscal_month IN (1, 4, 7, 10) AND @counter_week = 5 THEN 1 
+         WHEN @fiscal_month IN (1, 4, 7, 10) AND @counter_week < 5 THEN @counter_week + 1
+         WHEN @fiscal_month NOT IN (1, 4, 7, 10) AND @counter_week = 4 THEN 1 
+         WHEN @fiscal_month NOT IN (1, 4, 7, 10) AND @counter_week < 4 THEN @counter_week + 1 END
+
+      end
+  -- DAYS
+  ;WITH ro AS (SELECT PKDate, RANK() OVER (ORDER BY PKDate) as row_order FROM ref.days WHERE fiscal_year = @fiscal_year)
+   UPDATE ref.days
+   SET fiscal_day_in_year = row_order
+   FROM ref.days
+      JOIN ro ON days.PKDate = ro.PKDate 
+
+   SELECT @counter_year  = @counter_year + 1
+
+   end
+
+        
