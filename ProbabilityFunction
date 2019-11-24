@@ -1,0 +1,50 @@
+CREATE FUNCTION dbo.pabove(
+@strike REAL,
+@futures_close REAL,
+@iv_interpolated REAL,
+@date DATE,
+@options_expiration_date DATE
+	)
+	RETURNS REAL
+	AS 
+	BEGIN
+		DECLARE
+		@dtm FLOAT
+		,@d1 FLOAT
+		,@y FLOAT 
+		,@z FLOAT
+		,@lnpq FLOAT
+		,@vt FLOAT
+		,@y5 FLOAT
+		,@y4 FLOAT
+		,@y3 FLOAT
+		,@y2 FLOAT
+		,@y1 FLOAT
+		,@x FLOAT
+		,@pabove FLOAT
+		,@pbelow FLOAT
+
+
+		SET @lnpq = LOG(@strike/@futures_close) 
+		SET @dtm = NULLIF(DATEDIFF(day, @date, @options_expiration_date),0)
+		
+		SET @vt = (@iv_interpolated)*(SQRT(@dtm/365.0))
+		SET @d1 = @lnpq/@vt
+		SET @z = .3989423*EXP(-((@d1*@d1)/2))
+		SET @y = 1/(1+.2316419*ABS(@d1))
+		SET @y5 = (1.330274*POWER((1/(1+.2316419*ABS(@d1))),5))
+		SET @y4 = (1.821256*POWER((1/(1+.2316419*ABS(@d1))),4))
+		SET @y3 = (1.781478*POWER((1/(1+.2316419*ABS(@d1))),3))
+		SET @y2 = (.356538*POWER((1/(1+.2316419*ABS(@d1))),2))
+		SET @y1 = (.3193815*((1/(1+.2316419*ABS(@d1)))))
+
+		SET @x = CASE WHEN @d1 < 0 THEN 1-(1-@z*(@y5-@y4+@y3-@y2+@y1))
+									ELSE (1-@z*(@y5-@y4+@y3-@y2+@y1))
+									END
+
+		SET @pabove = (@x*1000)/10
+		SET @pbelow = ((1-@x)*1000)/10
+
+
+		RETURN @pabove
+		END;
